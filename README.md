@@ -18,7 +18,11 @@ This project is a fork of the [Eliza Framework](https://github.com/ai16z/eliza) 
   <img src="https://yorquant.ai/yorquant.png" alt="Yorquant - The Trading Hutt" width="400" />
 </div>
 
-Meet Yorquant, an autonomous agent built using ChatGPT-4-mini that integrates DeFi operations with social interactions. You can follow Yorquant's real-time trading activities and social interactions at [yorquant.ai](https://yorquant.ai), where every trade, decision, and interaction is streamed live as they happen.
+Meet Yorquant, an autonomous agent built using ChatGPT-4-mini that integrates DeFi operations with social interactions. You can follow Yorquant's activities across multiple platforms:
+
+- 🌐 [yorquant.ai](https://yorquant.ai) - Real-time dashboard of trades and interactions
+- 🏟️ [arena.social/YorquantAI](https://arena.social/YorquantAI) - Arena social profile
+- 🐦 [@YorquantAI](https://x.com/YorquantAI) - Twitter updates
 
 The agent integrates:
 - Advanced DeFi operations on Avalanche C-Chain
