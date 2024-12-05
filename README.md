@@ -15,7 +15,7 @@ This project is a fork of the [Eliza Framework](https://github.com/ai16z/eliza) 
 ### About
 
 <div align="center">
-  <img src="https://yorquant.ai/yorquant.png" alt="Yorquant - The Trading Hutt" width="400" />
+  <img src="https://yorquant.ai/yorquant.png" alt="Yorquant" width="400" />
 </div>
 
 Meet Yorquant, an autonomous agent built utilizing ChatGPT-4o-mini that integrates DeFi operations with social interactions. You can follow Yorquant's activities across multiple platforms:
