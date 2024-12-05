@@ -5,11 +5,12 @@ import { DirectClientInterface } from "@ai16z/client-direct";
 import { DiscordClientInterface } from "@ai16z/client-discord";
 import { TelegramClientInterface } from "@ai16z/client-telegram";
 import { TwitterClientInterface } from "@ai16z/client-twitter";
+import { AvalancheClientInterface } from "@ai16z/client-avalanche";
+import { ArenaClientInterface } from "@ai16z/client-arena";
 import {
     AgentRuntime,
     CacheManager,
     Character,
-    Clients,
     DbCacheAdapter,
     FsCacheAdapter,
     IAgentRuntime,
@@ -31,14 +32,12 @@ import {
     coinbaseCommercePlugin,
     coinbaseMassPaymentsPlugin,
     tradePlugin,
-    tokenContractPlugin,
 } from "@ai16z/plugin-coinbase";
 import { confluxPlugin } from "@ai16z/plugin-conflux";
 import { imageGenerationPlugin } from "@ai16z/plugin-image-generation";
 import { evmPlugin } from "@ai16z/plugin-evm";
 import { createNodePlugin } from "@ai16z/plugin-node";
 import { solanaPlugin } from "@ai16z/plugin-solana";
-import { aptosPlugin, TransferAptosToken } from "@ai16z/plugin-aptos";
 import { teePlugin } from "@ai16z/plugin-tee";
 import Database from "better-sqlite3";
 import fs from "fs";
@@ -46,6 +45,7 @@ import path from "path";
 import readline from "readline";
 import { fileURLToPath } from "url";
 import yargs from "yargs";
+import { createFirebaseLogger } from '@ai16z/firebase-logger';
 
 const __filename = fileURLToPath(import.meta.url); // get the resolved path to the file
 const __dirname = path.dirname(__filename); // get the name of the directory
@@ -325,6 +325,16 @@ export async function initializeClients(
         clients.push(twitterClients);
     }
 
+    if (clientTypes.includes("avalanche")) {
+        const avalancheClients = await AvalancheClientInterface.start(runtime);
+        clients.push(avalancheClients);
+    }
+
+    if (clientTypes.includes("arena")) {
+        const arenaClients = await ArenaClientInterface.start(runtime);
+        clients.push(arenaClients);
+    }
+
     if (character.plugins?.length > 0) {
         for (const plugin of character.plugins) {
             if (plugin.clients) {
@@ -355,6 +365,23 @@ export function createAgent(
         "Creating runtime for character",
         character.name
     );
+
+    // Initialize Firebase logger if credentials are available
+    let firebaseLogger;
+    const serviceAccount = character.settings?.secrets?.FIREBASE_SERVICE_ACCOUNT || process.env.FIREBASE_SERVICE_ACCOUNT;
+    const databaseURL = character.settings?.secrets?.FIREBASE_DATABASE_URL || process.env.FIREBASE_DATABASE_URL;
+
+    if (serviceAccount && databaseURL) {
+        try {
+            firebaseLogger = createFirebaseLogger({
+                serviceAccount,
+                databaseURL
+            });
+            elizaLogger.success("Firebase logger initialized successfully");
+        } catch (error) {
+            elizaLogger.error("Failed to initialize Firebase logger:", error);
+        }
+    }
 
     nodePlugin ??= createNodePlugin();
 
@@ -391,17 +418,17 @@ export function createAgent(
                 : null,
             ...(getSecret(character, "COINBASE_API_KEY") &&
             getSecret(character, "COINBASE_PRIVATE_KEY")
-                ? [coinbaseMassPaymentsPlugin, tradePlugin, tokenContractPlugin]
+                ? [coinbaseMassPaymentsPlugin, tradePlugin]
                 : []),
             getSecret(character, "WALLET_SECRET_SALT") ? teePlugin : null,
             getSecret(character, "ALCHEMY_API_KEY") ? goatPlugin : null,
-            getSecret(character, "APTOS_PRIVATE_KEY") ? aptosPlugin : null,
         ].filter(Boolean),
         providers: [],
         actions: [],
         services: [],
         managers: [],
         cacheManager: cache,
+        firebaseLogger,
     });
 }
 

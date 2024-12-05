@@ -1,4 +1,4 @@
-[@ai16z/eliza v0.1.4-alpha.3](../index.md) / CharacterSchema
+[@ai16z/eliza v0.1.5-alpha.3](../index.md) / CharacterSchema
 
 # Variable: CharacterSchema
 
@@ -66,7 +66,7 @@ Main Character schema
 
 ### plugins
 
-> **plugins**: `ZodArray`\<`ZodObject`\<`object`, `"strip"`, `ZodTypeAny`, `object`, `object`\>, `"many"`\>
+> **plugins**: `ZodUnion`\<[`ZodArray`\<`ZodString`, `"many"`\>, `ZodArray`\<`ZodObject`\<`object`, `"strip"`, `ZodTypeAny`, `object`, `object`\>, `"many"`\>]\>
 
 ### settings
 
