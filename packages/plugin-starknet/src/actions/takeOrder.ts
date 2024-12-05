@@ -84,7 +84,7 @@ const take_order: Action = {
         const convictionResponse = await generateText({
             runtime,
             context: context,
-            modelClass: ModelClass.LARGE,
+            modelClass: ModelClass.SMALL,
         });
 
         // TODOL parse and validate the JSON

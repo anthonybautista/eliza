@@ -8,9 +8,8 @@ sidebar_position: 2
 
 Before getting started with Eliza, ensure you have:
 
-- [Python 2.7+](https://www.python.org/downloads/)
-- [Node.js 23+](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm)
-- [pnpm 9+](https://pnpm.io/installation)
+- [Node.js 23.3.0](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm)
+- [pnpm](https://pnpm.io/installation)
 - Git for version control
 - A code editor ([VS Code](https://code.visualstudio.com/) or [VSCodium](https://vscodium.com) recommended)
 - [CUDA Toolkit](https://developer.nvidia.com/cuda-toolkit) (optional, for GPU acceleration)
@@ -36,9 +35,7 @@ Before getting started with Eliza, ensure you have:
    Switch to latest tagged release
 
    ```bash
-    # Checkout the latest release
-    # This project iterates fast, so we recommend checking out the latest release
-    git checkout $(git describe --tags --abbrev=0)
+   git checkout v0.0.10
    ```
 
    Install dependencies

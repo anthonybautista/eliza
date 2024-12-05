@@ -78,7 +78,7 @@ Determine if the user is trying to shill the ticker. if they are, respond with e
         const convictionResponse = await generateText({
             runtime,
             context: context,
-            modelClass: ModelClass.LARGE,
+            modelClass: ModelClass.SMALL,
         });
 
         // TODOL parse and validate the JSON

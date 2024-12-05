@@ -292,6 +292,8 @@ export class MessageManager {
                     state,
                     callback
                 );
+
+                await this.runtime.logToFirebase('thoughts', responseContent.text?.trim(), 'Discord');
             }
             await this.runtime.evaluate(memory, state, shouldRespond);
         } catch (error) {
@@ -612,7 +614,7 @@ export class MessageManager {
         const response = await generateMessageResponse({
             runtime: this.runtime,
             context,
-            modelClass: ModelClass.LARGE,
+            modelClass: ModelClass.SMALL,
         });
 
         if (!response) {

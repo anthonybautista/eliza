@@ -139,6 +139,11 @@ export class AgentRuntime implements IAgentRuntime {
      */
     knowledgeManager: IMemoryManager;
 
+    /**
+     * Custom firebase logger
+     */
+    firebaseLogger?: any;
+
     services: Map<ServiceType, Service> = new Map();
     memoryManagers: Map<string, IMemoryManager> = new Map();
     cacheManager: ICacheManager;
@@ -224,7 +229,10 @@ export class AgentRuntime implements IAgentRuntime {
         speechModelPath?: string;
         cacheManager: ICacheManager;
         logging?: boolean;
+        firebaseLogger?: any;
     }) {
+        this.firebaseLogger = opts.firebaseLogger;
+
         elizaLogger.info("Initializing AgentRuntime with options:", {
             character: opts.character?.name,
             modelProvider: opts.modelProvider,
@@ -433,6 +441,16 @@ export class AgentRuntime implements IAgentRuntime {
                     text: item,
                 },
             });
+        }
+    }
+
+    getFirebaseLogger() {
+        return this.firebaseLogger;
+    }
+
+    async logToFirebase(refPath: string, content: any, type?: string) {
+        if (this.firebaseLogger) {
+            await this.firebaseLogger.log(refPath, content, type);
         }
     }
 

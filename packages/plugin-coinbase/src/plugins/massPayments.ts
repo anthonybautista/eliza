@@ -25,13 +25,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs";
 import { createArrayCsvWriter } from "csv-writer";
-import {
-    appendTransactionsToCsv,
-    executeTransfer,
-    getCharityAddress,
-    getWalletDetails,
-    initializeWallet,
-} from "../utils";
+import { appendTransactionsToCsv, executeTransfer, getCharityAddress, getWalletDetails, initializeWallet } from "../utils";
 
 // Dynamically resolve the file path to the src/plugins directory
 const __filename = fileURLToPath(import.meta.url);
@@ -140,12 +134,7 @@ async function executeMassPayout(
                     }
 
                     // Execute the transfer
-                    const transfer = await executeTransfer(
-                        sendingWallet,
-                        transferAmount,
-                        assetIdLowercase,
-                        address
-                    );
+                    const transfer = await executeTransfer(sendingWallet, transferAmount, assetIdLowercase, address);
 
                     transactions.push({
                         address,
@@ -154,6 +143,7 @@ async function executeMassPayout(
                         errorCode: null,
                         transactionUrl: transfer.getTransactionLink(),
                     });
+
                 } catch (error) {
                     elizaLogger.error(
                         "Error during transfer for address:",
@@ -181,12 +171,7 @@ async function executeMassPayout(
         }
         // Send 1% to charity
         const charityAddress = getCharityAddress(networkId);
-        const charityTransfer = await executeTransfer(
-            sendingWallet,
-            transferAmount * 0.01,
-            assetId,
-            charityAddress
-        );
+        const charityTransfer = await executeTransfer(sendingWallet, transferAmount * 0.01, assetId, charityAddress);
         transactions.push({
             address: charityAddress,
             amount: charityTransfer.getAmount().toNumber(),
@@ -258,7 +243,7 @@ export const sendMassPayoutAction: Action = {
             const transferDetails = await generateObjectV2({
                 runtime,
                 context,
-                modelClass: ModelClass.LARGE,
+                modelClass: ModelClass.SMALL,
                 schema: TransferSchema,
             });
 

@@ -82,11 +82,11 @@ class RequestQueue {
 }
 
 export class ClientBase extends EventEmitter {
-    static _twitterClients: { [accountIdentifier: string]: Scraper } = {};
+    static _twitterClient: Scraper;
     twitterClient: Scraper;
     runtime: IAgentRuntime;
     directions: string;
-    lastCheckedTweetId: bigint | null = null;
+    lastCheckedTweetId: number | null = null;
     imageDescriptionService: IImageDescriptionService;
     temperature: number = 0.5;
 
@@ -137,12 +137,11 @@ export class ClientBase extends EventEmitter {
     constructor(runtime: IAgentRuntime) {
         super();
         this.runtime = runtime;
-        const username = this.runtime.getSetting("TWITTER_USERNAME");
-        if (ClientBase._twitterClients[username]) {
-            this.twitterClient = ClientBase._twitterClients[username];
+        if (ClientBase._twitterClient) {
+            this.twitterClient = ClientBase._twitterClient;
         } else {
             this.twitterClient = new Scraper();
-            ClientBase._twitterClients[username] = this.twitterClient;
+            ClientBase._twitterClient = this.twitterClient;
         }
 
         this.directions =
@@ -153,62 +152,91 @@ export class ClientBase extends EventEmitter {
     }
 
     async init() {
-        //test
         const username = this.runtime.getSetting("TWITTER_USERNAME");
-
         if (!username) {
             throw new Error("Twitter username not configured");
         }
-        // Check for Twitter cookies
-        if (this.runtime.getSetting("TWITTER_COOKIES")) {
-            const cookiesArray = JSON.parse(
-                this.runtime.getSetting("TWITTER_COOKIES")
-            );
 
+        // First try to use provided cookies
+        if (this.runtime.getSetting("TWITTER_COOKIES")) {
+            elizaLogger.log("Using provided Twitter cookies");
+            const cookiesArray = JSON.parse(
+            this.runtime.getSetting("TWITTER_COOKIES")
+            );
             await this.setCookiesFromArray(cookiesArray);
-        } else {
-            const cachedCookies = await this.getCachedCookies(username);
-            if (cachedCookies) {
-                await this.setCookiesFromArray(cachedCookies);
+
+            // Check if we're logged in with the cookies
+            if (await this.twitterClient.isLoggedIn()) {
+            elizaLogger.log("Successfully logged in with provided cookies");
+            // Cache the working cookies
+            const cookies = await this.twitterClient.getCookies();
+            await this.cacheCookies(username, cookies);
+            } else {
+            throw new Error("Provided Twitter cookies are invalid or expired");
             }
         }
+        // If no cookies provided, try cached cookies
+        else if (await this.getCachedCookies(username)) {
+            elizaLogger.log("Using cached Twitter cookies");
+            const cachedCookies = await this.getCachedCookies(username);
+            await this.setCookiesFromArray(cachedCookies);
 
-        elizaLogger.log("Waiting for Twitter login");
-        while (true) {
-            await this.twitterClient.login(
+            // Check if we're logged in with cached cookies
+            if (await this.twitterClient.isLoggedIn()) {
+            elizaLogger.log("Successfully logged in with cached cookies");
+            } else {
+            throw new Error("Cached Twitter cookies are invalid or expired");
+            }
+        }
+        // If no cookies available and credentials provided, use password login
+        else if (this.runtime.getSetting("TWITTER_PASSWORD") && this.runtime.getSetting("TWITTER_EMAIL")) {
+            elizaLogger.log("No cookies available, attempting password login");
+            let loginSuccessful = false;
+            let attempts = 0;
+            const maxAttempts = 3;
+
+            while (!loginSuccessful && attempts < maxAttempts) {
+            try {
+                await this.twitterClient.login(
                 username,
                 this.runtime.getSetting("TWITTER_PASSWORD"),
                 this.runtime.getSetting("TWITTER_EMAIL"),
-                this.runtime.getSetting("TWITTER_2FA_SECRET") || undefined
-            );
+                this.runtime.getSetting("TWITTER_2FA_SECRET")
+                );
 
-            if (await this.twitterClient.isLoggedIn()) {
+                if (await this.twitterClient.isLoggedIn()) {
+                loginSuccessful = true;
+                elizaLogger.log("Successfully logged in with password");
                 const cookies = await this.twitterClient.getCookies();
                 await this.cacheCookies(username, cookies);
-                break;
+                }
+            } catch (error) {
+                attempts++;
+                elizaLogger.error(`Login attempt ${attempts} failed:`, error);
+                if (attempts >= maxAttempts) {
+                throw new Error(`Failed to login after ${maxAttempts} attempts: ${error.message}`);
+                }
+                await new Promise(resolve => setTimeout(resolve, 2000 * attempts));
             }
-
-            elizaLogger.error("Failed to login to Twitter trying again...");
-
-            await new Promise((resolve) => setTimeout(resolve, 2000));
+            }
+        } else {
+            throw new Error("No valid authentication method provided. Please provide either Twitter cookies or username/password/email credentials.");
         }
 
-        // Initialize Twitter profile
-        this.profile = await this.fetchProfile(username);
 
+        this.profile = await this.fetchProfile(username);
         if (this.profile) {
             elizaLogger.log("Twitter user ID:", this.profile.id);
             elizaLogger.log(
-                "Twitter loaded:",
-                JSON.stringify(this.profile, null, 10)
+            "Twitter loaded:",
+            JSON.stringify(this.profile, null, 10)
             );
-            // Store profile info for use in responses
             this.runtime.character.twitterProfile = {
-                id: this.profile.id,
-                username: this.profile.username,
-                screenName: this.profile.screenName,
-                bio: this.profile.bio,
-                nicknames: this.profile.nicknames,
+            id: this.profile.id,
+            username: this.profile.username,
+            screenName: this.profile.screenName,
+            bio: this.profile.bio,
+            nicknames: this.profile.nicknames
             };
         } else {
             throw new Error("Failed to load profile");
@@ -589,12 +617,12 @@ export class ClientBase extends EventEmitter {
 
     async loadLatestCheckedTweetId(): Promise<void> {
         const latestCheckedTweetId =
-            await this.runtime.cacheManager.get<string>(
+            await this.runtime.cacheManager.get<number>(
                 `twitter/${this.profile.username}/latest_checked_tweet_id`
             );
 
         if (latestCheckedTweetId) {
-            this.lastCheckedTweetId = BigInt(latestCheckedTweetId);
+            this.lastCheckedTweetId = latestCheckedTweetId;
         }
     }
 
@@ -602,7 +630,7 @@ export class ClientBase extends EventEmitter {
         if (this.lastCheckedTweetId) {
             await this.runtime.cacheManager.set(
                 `twitter/${this.profile.username}/latest_checked_tweet_id`,
-                this.lastCheckedTweetId.toString()
+                this.lastCheckedTweetId
             );
         }
     }
@@ -617,7 +645,7 @@ export class ClientBase extends EventEmitter {
         await this.runtime.cacheManager.set(
             `twitter/${this.profile.username}/timeline`,
             timeline,
-            { expires: Date.now() + 10 * 1000 }
+            { expires: 10 * 1000 }
         );
     }
 
@@ -625,7 +653,7 @@ export class ClientBase extends EventEmitter {
         await this.runtime.cacheManager.set(
             `twitter/${this.profile.username}/mentions`,
             mentions,
-            { expires: Date.now() + 10 * 1000 }
+            { expires: 10 * 1000 }
         );
     }
 

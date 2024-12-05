@@ -71,7 +71,7 @@ export const zgUpload: Action = {
         const content = await generateObjectV2({
             runtime,
             context: uploadContext,
-            modelClass: ModelClass.LARGE,
+            modelClass: ModelClass.SMALL,
         });
 
         // Validate upload content

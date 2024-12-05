@@ -7,7 +7,8 @@
     "dependencies": {
         "@ai16z/eliza": "workspace:*",
         "@farcaster/hub-nodejs": "0.12.7",
-        "viem": "2.21.53"
+        "viem": "2.21.53",
+        "vite": "^5.0.0"
     },
     "devDependencies": {
         "tsup": "8.3.5"

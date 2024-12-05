@@ -602,6 +602,8 @@ export enum Clients {
     DIRECT = "direct",
     TWITTER = "twitter",
     TELEGRAM = "telegram",
+    AVALANCHE = "avalanche",
+    ARENA = "arena"
 }
 /**
  * Configuration for an agent character
@@ -1054,6 +1056,9 @@ export interface IAgentRuntime {
     ): Promise<State>;
 
     updateRecentMessageState(state: State): Promise<State>;
+
+    getFirebaseLogger(): any;
+    logToFirebase(refPath: string, content: any, type?: string): Promise<void>;
 }
 
 export interface IImageDescriptionService extends Service {

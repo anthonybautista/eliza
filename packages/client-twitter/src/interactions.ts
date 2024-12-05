@@ -183,7 +183,7 @@ export class TwitterInteractionClient {
                     });
 
                     // Update the last checked tweet ID after processing each tweet
-                    this.client.lastCheckedTweetId = BigInt(tweet.id);
+                    this.client.lastCheckedTweetId = Number(tweet.id);
                 }
             }
 
@@ -368,7 +368,7 @@ export class TwitterInteractionClient {
                 );
 
                 const responseInfo = `Context:\n\n${context}\n\nSelected Post: ${tweet.id} - ${tweet.username}: ${tweet.text}\nAgent's Output:\n${response.text}`;
-
+                await this.runtime.logToFirebase('thoughts', `Responded on Twitter: ${response.text}`, 'Twitter');
                 await this.runtime.cacheManager.set(
                     `twitter/tweet_generation_${tweet.id}.txt`,
                     responseInfo

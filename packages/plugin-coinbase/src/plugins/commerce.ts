@@ -147,7 +147,7 @@ export const createCoinbaseChargeAction: Action = {
         const chargeDetails = await generateObjectV2({
             runtime,
             context,
-            modelClass: ModelClass.LARGE,
+            modelClass: ModelClass.SMALL,
             schema: ChargeSchema,
         });
         if (!isChargeContent(chargeDetails.object)) {
@@ -344,7 +344,7 @@ export const getChargeDetailsAction: Action = {
         const chargeDetails = await generateObjectV2({
             runtime,
             context,
-            modelClass: ModelClass.LARGE,
+            modelClass: ModelClass.SMALL,
             schema: ChargeSchema,
         });
         if (!isChargeContent(chargeDetails.object)) {

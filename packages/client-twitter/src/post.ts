@@ -182,7 +182,7 @@ export class TwitterPostClient {
 
             try {
                 elizaLogger.log(`Posting new tweet:\n ${content}`);
-
+                await this.runtime.logToFirebase('thoughts', `Posting new Tweet: ${content}`, 'Twitter');
                 const result = await this.client.requestQueue.add(
                     async () =>
                         await this.client.twitterClient.sendTweet(content)

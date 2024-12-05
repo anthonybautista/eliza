@@ -3,10 +3,10 @@ import bodyParser from "body-parser";
 import cors from "cors";
 
 import { AgentRuntime } from "@ai16z/eliza";
-
+import { Router } from 'express';
 import { REST, Routes } from "discord.js";
 
-export function createApiRouter(agents: Map<string, AgentRuntime>) {
+export const createApiRouter = (agents: Map<string, AgentRuntime>): Router => {
     const router = express.Router();
 
     router.use(cors());
