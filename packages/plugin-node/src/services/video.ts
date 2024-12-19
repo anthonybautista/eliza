@@ -20,6 +20,7 @@ export class VideoService extends Service implements IVideoService {
 
     private queue: string[] = [];
     private processing: boolean = false;
+    private maxRetries = 3;
 
     constructor() {
         super();
@@ -34,7 +35,7 @@ export class VideoService extends Service implements IVideoService {
 
     private ensureDataDirectoryExists() {
         if (!fs.existsSync(this.dataDir)) {
-            fs.mkdirSync(this.dataDir);
+            fs.mkdirSync(this.dataDir, { recursive: true });
         }
     }
 
@@ -42,7 +43,9 @@ export class VideoService extends Service implements IVideoService {
         return (
             url.includes("youtube.com") ||
             url.includes("youtu.be") ||
-            url.includes("vimeo.com")
+            url.includes("vimeo.com") ||
+            url.endsWith(".mp4") ||
+            url.includes(".mp4?")
         );
     }
 
@@ -50,7 +53,6 @@ export class VideoService extends Service implements IVideoService {
         const videoId = this.getVideoId(url);
         const outputFile = path.join(this.dataDir, `${videoId}.mp4`);
 
-        // if it already exists, return it
         if (fs.existsSync(outputFile)) {
             return outputFile;
         }
@@ -59,20 +61,19 @@ export class VideoService extends Service implements IVideoService {
             await youtubeDl(url, {
                 verbose: true,
                 output: outputFile,
-                writeInfoJson: true,
+                format: "mp4",
             });
             return outputFile;
         } catch (error) {
             console.error("Error downloading media:", error);
-            throw new Error("Failed to download media");
+            return outputFile; // Return the path even if download failed
         }
     }
 
     public async downloadVideo(videoInfo: any): Promise<string> {
-        const videoId = this.getVideoId(videoInfo.webpage_url);
+        const videoId = this.getVideoId(videoInfo?.webpage_url || '');
         const outputFile = path.join(this.dataDir, `${videoId}.mp4`);
 
-        // if it already exists, return it
         if (fs.existsSync(outputFile)) {
             return outputFile;
         }
@@ -81,13 +82,12 @@ export class VideoService extends Service implements IVideoService {
             await youtubeDl(videoInfo.webpage_url, {
                 verbose: true,
                 output: outputFile,
-                format: "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-                writeInfoJson: true,
+                format: "mp4",
             });
             return outputFile;
         } catch (error) {
             console.error("Error downloading video:", error);
-            throw new Error("Failed to download video");
+            return outputFile; // Return the path even if download failed
         }
     }
 
@@ -95,10 +95,8 @@ export class VideoService extends Service implements IVideoService {
         url: string,
         runtime: IAgentRuntime
     ): Promise<Media> {
-        this.queue.push(url);
-        this.processQueue(runtime);
-
-        return new Promise((resolve, reject) => {
+        return new Promise((resolve) => {
+            this.queue.push(url);
             const checkQueue = async () => {
                 const index = this.queue.indexOf(url);
                 if (index !== -1) {
@@ -111,10 +109,12 @@ export class VideoService extends Service implements IVideoService {
                         );
                         resolve(result);
                     } catch (error) {
-                        reject(error);
+                        console.error("Error in processVideo:", error);
+                        resolve(this.createErrorMedia(url, error));
                     }
                 }
             };
+            this.processQueue(runtime);
             checkQueue();
         });
     }
@@ -128,52 +128,78 @@ export class VideoService extends Service implements IVideoService {
 
         while (this.queue.length > 0) {
             const url = this.queue.shift()!;
-            await this.processVideoFromUrl(url, runtime);
+            try {
+                await this.processVideoFromUrl(url, runtime);
+            } catch (error) {
+                console.error(`Error processing video ${url}:`, error);
+                // Continue processing queue even if one video fails
+            }
         }
 
         this.processing = false;
     }
 
+    private createErrorMedia(url: string, error: any): Media {
+        const videoId = this.getVideoId(url);
+        return {
+            id: videoId,
+            url: url,
+            title: "Processing Failed",
+            source: "Error",
+            description: "Failed to process video content",
+            text: `Failed to process video content: ${error?.message || 'Unknown error'}. Please try again later.`,
+        };
+    }
+
     private async processVideoFromUrl(
         url: string,
-        runtime: IAgentRuntime
+        runtime: IAgentRuntime,
+        retryCount = 0
     ): Promise<Media> {
-        const videoId =
-            url.match(
-                /(?:youtu\.be\/|youtube\.com(?:\/embed\/|\/v\/|\/watch\?v=|\/watch\?.+&v=))([^\/&?]+)/ // eslint-disable-line
-            )?.[1] || "";
-        const videoUuid = this.getVideoId(videoId);
-        const cacheKey = `${this.cacheKey}/${videoUuid}`;
+        const videoId = url.match(
+            /(?:youtu\.be\/|youtube\.com(?:\/embed\/|\/v\/|\/watch\?v=|\/watch\?.+&v=))([^\/&?]+)/
+        )?.[1] || this.getVideoId(url);
 
-        const cached = await runtime.cacheManager.get<Media>(cacheKey);
+        const cacheKey = `${this.cacheKey}/${videoId}`;
 
-        if (cached) {
-            console.log("Returning cached video file");
-            return cached;
+        try {
+            const cached = await runtime.cacheManager.get<Media>(cacheKey);
+            if (cached) {
+                console.log("Returning cached video file");
+                return cached;
+            }
+
+            console.log("Cache miss, processing video");
+            const videoInfo = await this.fetchVideoInfo(url);
+            const transcript = await this.getTranscript(url, videoInfo, runtime);
+
+            const result: Media = {
+                id: videoId,
+                url: url,
+                title: videoInfo?.title || "Unknown Title",
+                source: videoInfo?.channel || videoInfo?.uploader || "Unknown Source",
+                description: videoInfo?.description || "No description available",
+                text: transcript || "No transcript available",
+            };
+
+            await runtime.cacheManager.set(cacheKey, result);
+            return result;
+        } catch (error) {
+            console.error(`Error processing video (attempt ${retryCount + 1}):`, error);
+
+            if (retryCount < this.maxRetries) {
+                console.log(`Retrying... (${retryCount + 1}/${this.maxRetries})`);
+                return this.processVideoFromUrl(url, runtime, retryCount + 1);
+            }
+
+            const fallbackResult = this.createErrorMedia(url, error);
+            await runtime.cacheManager.set(cacheKey, fallbackResult);
+            return fallbackResult;
         }
-
-        console.log("Cache miss, processing video");
-        console.log("Fetching video info");
-        const videoInfo = await this.fetchVideoInfo(url);
-        console.log("Getting transcript");
-        const transcript = await this.getTranscript(url, videoInfo, runtime);
-
-        const result: Media = {
-            id: videoUuid,
-            url: url,
-            title: videoInfo.title,
-            source: videoInfo.channel,
-            description: videoInfo.description,
-            text: transcript,
-        };
-
-        await runtime.cacheManager.set(cacheKey, result);
-
-        return result;
     }
 
     private getVideoId(url: string): string {
-        return stringToUuid(url);
+        return stringToUuid(url || 'unknown-video');
     }
 
     async fetchVideoInfo(url: string): Promise<any> {
@@ -181,36 +207,38 @@ export class VideoService extends Service implements IVideoService {
             try {
                 const response = await fetch(url);
                 if (response.ok) {
-                    // If the URL is a direct link to an MP4 file, return a simplified video info object
                     return {
                         title: path.basename(url),
-                        description: "",
-                        channel: "",
+                        description: "Direct video file",
+                        channel: "Unknown Source",
+                        webpage_url: url,
+                        uploader: "Unknown Uploader",
                     };
                 }
             } catch (error) {
                 console.error("Error downloading MP4 file:", error);
-                // Fall back to using youtube-dl if direct download fails
             }
         }
 
         try {
             const result = await youtubeDl(url, {
                 dumpJson: true,
-                verbose: true,
-                callHome: false,
                 noCheckCertificates: true,
                 preferFreeFormats: true,
-                youtubeSkipDashManifest: true,
-                writeSub: true,
-                writeAutoSub: true,
-                subLang: "en",
                 skipDownload: true,
             });
             return result;
         } catch (error) {
-            console.error("Error fetching video info:", error);
-            throw new Error("Failed to fetch video information");
+            console.warn("Video info fetch failed:", error.message);
+
+            const videoId = url.match(/(?:v=|\/)([a-zA-Z0-9_-]{11})/)?.[1];
+            return {
+                title: videoId ? `YouTube Video ${videoId}` : "Unknown Video",
+                description: "Video information unavailable",
+                channel: "Unknown Channel",
+                webpage_url: url,
+                uploader: "Unknown Uploader",
+            };
         }
     }
 
@@ -219,142 +247,142 @@ export class VideoService extends Service implements IVideoService {
         videoInfo: any,
         runtime: IAgentRuntime
     ): Promise<string> {
-        console.log("Getting transcript");
         try {
-            // Check for manual subtitles
-            if (videoInfo.subtitles && videoInfo.subtitles.en) {
-                console.log("Manual subtitles found");
-                const srtContent = await this.downloadSRT(
-                    videoInfo.subtitles.en[0].url
-                );
-                return this.parseSRT(srtContent);
+            // Try each method in sequence, falling back to the next if one fails
+            try {
+                if (videoInfo?.subtitles?.en) {
+                    const srtContent = await this.downloadSRT(
+                        videoInfo.subtitles.en[0].url
+                    );
+                    return this.parseSRT(srtContent);
+                }
+            } catch (error) {
+                console.warn("Manual subtitles failed:", error);
             }
 
-            // Check for automatic captions
-            if (
-                videoInfo.automatic_captions &&
-                videoInfo.automatic_captions.en
-            ) {
-                console.log("Automatic captions found");
-                const captionUrl = videoInfo.automatic_captions.en[0].url;
-                const captionContent = await this.downloadCaption(captionUrl);
-                return this.parseCaption(captionContent);
+            try {
+                if (videoInfo?.automatic_captions?.en) {
+                    const captionUrl = videoInfo.automatic_captions.en[0].url;
+                    const captionContent = await this.downloadCaption(captionUrl);
+                    return this.parseCaption(captionContent);
+                }
+            } catch (error) {
+                console.warn("Automatic captions failed:", error);
             }
 
-            // Check if it's a music video
-            if (
-                videoInfo.categories &&
-                videoInfo.categories.includes("Music")
-            ) {
-                console.log("Music video detected, no lyrics available");
-                return "No lyrics available.";
+            if (videoInfo?.categories?.includes("Music")) {
+                return "No lyrics available for music video.";
             }
 
-            // Fall back to audio transcription
-            console.log(
-                "No captions found, falling back to audio transcription"
-            );
-            return this.transcribeAudio(url, runtime);
+            return await this.transcribeAudio(url, runtime);
         } catch (error) {
-            console.error("Error in getTranscript:", error);
-            throw error;
+            console.error("All transcript methods failed:", error);
+            return "Transcript unavailable. The content could not be processed at this time.";
         }
     }
 
     private async downloadCaption(url: string): Promise<string> {
         console.log("Downloading caption from:", url);
-        const response = await fetch(url);
-        if (!response.ok) {
-            throw new Error(
-                `Failed to download caption: ${response.statusText}`
-            );
+        try {
+            const response = await fetch(url);
+            if (!response.ok) {
+                throw new Error(`Failed to download caption: ${response.statusText}`);
+            }
+            return await response.text();
+        } catch (error) {
+            console.error("Caption download failed:", error);
+            throw error;
         }
-        return await response.text();
     }
 
     private parseCaption(captionContent: string): string {
-        console.log("Parsing caption");
         try {
             const jsonContent = JSON.parse(captionContent);
             if (jsonContent.events) {
                 return jsonContent.events
                     .filter((event) => event.segs)
                     .map((event) => event.segs.map((seg) => seg.utf8).join(""))
-                    .join("")
-                    .replace("\n", " ");
-            } else {
-                console.error("Unexpected caption format:", jsonContent);
-                return "Error: Unable to parse captions";
+                    .join(" ")
+                    .replace(/\n/g, " ")
+                    .trim();
             }
+            return "Unable to parse captions: invalid format";
         } catch (error) {
-            console.error("Error parsing caption:", error);
-            return "Error: Unable to parse captions";
+            console.error("Caption parsing failed:", error);
+            return "Unable to parse captions: parsing error";
         }
     }
 
     private parseSRT(srtContent: string): string {
-        // Simple SRT parser (replace with a more robust solution if needed)
-        return srtContent
-            .split("\n\n")
-            .map((block) => block.split("\n").slice(2).join(" "))
-            .join(" ");
+        try {
+            return srtContent
+                .split("\n\n")
+                .map((block) => block.split("\n").slice(2).join(" "))
+                .join(" ")
+                .replace(/\n/g, " ")
+                .trim();
+        } catch (error) {
+            console.error("SRT parsing failed:", error);
+            return "Unable to parse subtitles";
+        }
     }
 
     private async downloadSRT(url: string): Promise<string> {
-        console.log("downloadSRT");
-        const response = await fetch(url);
-        return await response.text();
+        try {
+            const response = await fetch(url);
+            if (!response.ok) {
+                throw new Error(`Failed to download SRT: ${response.statusText}`);
+            }
+            return await response.text();
+        } catch (error) {
+            console.error("SRT download failed:", error);
+            throw error;
+        }
     }
 
     async transcribeAudio(
         url: string,
         runtime: IAgentRuntime
     ): Promise<string> {
-        console.log("Preparing audio for transcription...");
-        const mp4FilePath = path.join(
-            this.dataDir,
-            `${this.getVideoId(url)}.mp4`
-        );
+        try {
+            const mp4FilePath = path.join(
+                this.dataDir,
+                `${this.getVideoId(url)}.mp4`
+            );
 
-        const mp3FilePath = path.join(
-            this.dataDir,
-            `${this.getVideoId(url)}.mp3`
-        );
+            const mp3FilePath = path.join(
+                this.dataDir,
+                `${this.getVideoId(url)}.mp3`
+            );
 
-        if (!fs.existsSync(mp3FilePath)) {
-            if (fs.existsSync(mp4FilePath)) {
-                console.log("MP4 file found. Converting to MP3...");
-                await this.convertMp4ToMp3(mp4FilePath, mp3FilePath);
-            } else {
-                console.log("Downloading audio...");
-                await this.downloadAudio(url, mp3FilePath);
+            if (!fs.existsSync(mp3FilePath)) {
+                if (fs.existsSync(mp4FilePath)) {
+                    await this.convertMp4ToMp3(mp4FilePath, mp3FilePath);
+                } else {
+                    await this.downloadAudio(url, mp3FilePath);
+                }
             }
+
+            if (!fs.existsSync(mp3FilePath)) {
+                throw new Error("Failed to prepare audio file");
+            }
+
+            const audioBuffer = fs.readFileSync(mp3FilePath);
+
+            const transcriptionService = runtime.getService<ITranscriptionService>(
+                ServiceType.TRANSCRIPTION
+            );
+
+            if (!transcriptionService) {
+                throw new Error("Transcription service not available");
+            }
+
+            const transcript = await transcriptionService.transcribe(audioBuffer);
+            return transcript || "Transcription produced no results";
+        } catch (error) {
+            console.error("Transcription failed:", error);
+            return "Audio transcription failed. Please try again later.";
         }
-
-        console.log(`Audio prepared at ${mp3FilePath}`);
-
-        const audioBuffer = fs.readFileSync(mp3FilePath);
-        console.log(`Audio file size: ${audioBuffer.length} bytes`);
-
-        console.log("Starting transcription...");
-        const startTime = Date.now();
-        const transcriptionService = runtime.getService<ITranscriptionService>(
-            ServiceType.TRANSCRIPTION
-        );
-
-        if (!transcriptionService) {
-            throw new Error("Transcription service not found");
-        }
-
-        const transcript = await transcriptionService.transcribe(audioBuffer);
-
-        const endTime = Date.now();
-        console.log(
-            `Transcription completed in ${(endTime - startTime) / 1000} seconds`
-        );
-
-        // Don't delete the MP3 file as it might be needed for future use
-        return transcript || "Transcription failed";
     }
 
     private async convertMp4ToMp3(
@@ -382,55 +410,56 @@ export class VideoService extends Service implements IVideoService {
         url: string,
         outputFile: string
     ): Promise<string> {
-        console.log("Downloading audio");
-        outputFile =
-            outputFile ??
-            path.join(this.dataDir, `${this.getVideoId(url)}.mp3`);
-
         try {
             if (url.endsWith(".mp4") || url.includes(".mp4?")) {
-                console.log(
-                    "Direct MP4 file detected, downloading and converting to MP3"
-                );
                 const tempMp4File = path.join(
                     tmpdir(),
                     `${this.getVideoId(url)}.mp4`
                 );
-                const response = await fetch(url);
-                const arrayBuffer = await response.arrayBuffer();
-                const buffer = Buffer.from(arrayBuffer);
-                fs.writeFileSync(tempMp4File, buffer);
 
-                await new Promise<void>((resolve, reject) => {
-                    ffmpeg(tempMp4File)
-                        .output(outputFile)
-                        .noVideo()
-                        .audioCodec("libmp3lame")
-                        .on("end", () => {
+                try {
+                    const response = await fetch(url);
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    const arrayBuffer = await response.arrayBuffer();
+                    const buffer = Buffer.from(arrayBuffer);
+                    fs.writeFileSync(tempMp4File, buffer);
+
+                    await new Promise<void>((resolve, reject) => {
+                        ffmpeg(tempMp4File)
+                            .output(outputFile)
+                            .noVideo()
+                            .audioCodec("libmp3lame")
+                            .on("end", () => {
+                                try {
+                                    fs.unlinkSync(tempMp4File);
+                                } catch (e) {
+                                    console.warn("Failed to cleanup temp file:", e);
+                                }
+                                resolve();
+                            })
+                            .on("error", reject)
+                            .run();
+                    });
+                } finally {
+                    if (fs.existsSync(tempMp4File)) {
+                        try {
                             fs.unlinkSync(tempMp4File);
-                            resolve();
-                        })
-                        .on("error", (err) => {
-                            reject(err);
-                        })
-                        .run();
-                });
+                        } catch (e) {
+                            console.warn("Failed to cleanup temp file:", e);
+                        }
+                    }
+                }
             } else {
-                console.log(
-                    "YouTube video detected, downloading audio with youtube-dl"
-                );
                 await youtubeDl(url, {
-                    verbose: true,
                     extractAudio: true,
                     audioFormat: "mp3",
                     output: outputFile,
-                    writeInfoJson: true,
                 });
             }
             return outputFile;
         } catch (error) {
             console.error("Error downloading audio:", error);
-            throw new Error("Failed to download audio");
+            throw new Error(`Failed to download audio: ${error.message}`);
         }
     }
 }

@@ -9,6 +9,7 @@ import {
     Media,
     ModelClass,
     ServiceType,
+    elizaLogger
 } from "@ai16z/eliza";
 import { Attachment, Collection } from "discord.js";
 import ffmpeg from "fluent-ffmpeg";
@@ -22,11 +23,11 @@ async function generateSummary(
     text = trimTokens(text, 100000, "gpt-4o-mini"); // TODO: clean this up
 
     const prompt = `Please generate a concise summary for the following text:
-  
+
   Text: """
   ${text}
   """
-  
+
   Respond with a JSON object in the following format:
   \`\`\`json
   {
@@ -323,40 +324,48 @@ export class AttachmentManager {
         };
     }
 
-    private async processVideoAttachment(
-        attachment: Attachment
-    ): Promise<Media> {
-        const videoService = this.runtime.getService<IVideoService>(
-            ServiceType.VIDEO
-        );
+    private async processVideoAttachment(attachment: Attachment): Promise<Media> {
+        try {
+            const videoService = this.runtime.getService<IVideoService>(ServiceType.VIDEO);
 
-        if (!videoService) {
-            throw new Error("Video service not found");
-        }
+            if (!videoService) {
+                elizaLogger.warn("Video service not found, skipping video processing");
+                return this.createFallbackVideoMedia(attachment);
+            }
 
-        if (videoService.isVideoUrl(attachment.url)) {
-            const videoInfo = await videoService.processVideo(
-                attachment.url,
-                this.runtime
-            );
-            return {
-                id: attachment.id,
-                url: attachment.url,
-                title: videoInfo.title,
-                source: "YouTube",
-                description: videoInfo.description,
-                text: videoInfo.text,
-            };
-        } else {
-            return {
-                id: attachment.id,
-                url: attachment.url,
-                title: "Video Attachment",
-                source: "Video",
-                description: "A video attachment",
-                text: "Video content not available",
-            };
+            if (videoService.isVideoUrl(attachment.url)) {
+                try {
+                    const videoInfo = await videoService.processVideo(attachment.url, this.runtime);
+                    return {
+                        id: attachment.id,
+                        url: attachment.url,
+                        title: videoInfo.title,
+                        source: "YouTube",
+                        description: videoInfo.description,
+                        text: videoInfo.text,
+                    };
+                } catch (error) {
+                    elizaLogger.error(`Error processing video: ${error.message}`);
+                    return this.createFallbackVideoMedia(attachment);
+                }
+            }
+
+            return this.createFallbackVideoMedia(attachment);
+        } catch (error) {
+            elizaLogger.error(`Video attachment processing error: ${error.message}`);
+            return this.createFallbackVideoMedia(attachment);
         }
+    }
+
+    private createFallbackVideoMedia(attachment: Attachment): Media {
+        return {
+            id: attachment.id,
+            url: attachment.url,
+            title: "Video Attachment",
+            source: "Video",
+            description: "A video attachment (processing unavailable)",
+            text: `This is a video attachment. File name: ${attachment.name}, Size: ${attachment.size} bytes, Content type: ${attachment.contentType}`,
+        };
     }
 
     private async processGenericAttachment(

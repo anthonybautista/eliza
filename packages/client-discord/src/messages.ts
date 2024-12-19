@@ -330,95 +330,75 @@ export class MessageManager {
         }
     }
 
-    async processMessageMedia(
-        message: DiscordMessage
-    ): Promise<{ processedContent: string; attachments: Media[] }> {
+    async processMessageMedia(message: DiscordMessage): Promise<{ processedContent: string; attachments: Media[] }> {
         let processedContent = message.content;
-
         let attachments: Media[] = [];
 
-        // Process code blocks in the message content
-        const codeBlockRegex = /```([\s\S]*?)```/g;
-        let match;
-        while ((match = codeBlockRegex.exec(processedContent))) {
-            const codeBlock = match[1];
-            const lines = codeBlock.split("\n");
-            const title = lines[0];
-            const description = lines.slice(0, 3).join("\n");
-            const attachmentId =
-                `code-${Date.now()}-${Math.floor(Math.random() * 1000)}`.slice(
-                    -5
-                );
-            attachments.push({
-                id: attachmentId,
-                url: "",
-                title: title || "Code Block",
-                source: "Code",
-                description: description,
-                text: codeBlock,
-            });
-            processedContent = processedContent.replace(
-                match[0],
-                `Code Block (${attachmentId})`
-            );
-        }
-
-        // Process message attachments
-        if (message.attachments.size > 0) {
-            attachments = await this.attachmentManager.processAttachments(
-                message.attachments
-            );
-        }
-
-        // TODO: Move to attachments manager
-        const urlRegex = /(https?:\/\/[^\s]+)/g;
-        const urls = processedContent.match(urlRegex) || [];
-
-        for (const url of urls) {
-            if (
-                this.runtime
-                    .getService<IVideoService>(ServiceType.VIDEO)
-                    ?.isVideoUrl(url)
-            ) {
-                const videoService = this.runtime.getService<IVideoService>(
-                    ServiceType.VIDEO
-                );
-                if (!videoService) {
-                    throw new Error("Video service not found");
+        try {
+            // Process message attachments
+            if (message.attachments.size > 0) {
+                try {
+                    attachments = await this.attachmentManager.processAttachments(message.attachments);
+                } catch (error) {
+                    elizaLogger.error(`Error processing message attachments: ${error.message}`);
                 }
-                const videoInfo = await videoService.processVideo(
-                    url,
-                    this.runtime
-                );
-
-                attachments.push({
-                    id: `youtube-${Date.now()}`,
-                    url: url,
-                    title: videoInfo.title,
-                    source: "YouTube",
-                    description: videoInfo.description,
-                    text: videoInfo.text,
-                });
-            } else {
-                const browserService = this.runtime.getService<IBrowserService>(
-                    ServiceType.BROWSER
-                );
-                if (!browserService) {
-                    throw new Error("Browser service not found");
-                }
-
-                const { title, description: summary } =
-                    await browserService.getPageContent(url, this.runtime);
-
-                attachments.push({
-                    id: `webpage-${Date.now()}`,
-                    url: url,
-                    title: title || "Web Page",
-                    source: "Web",
-                    description: summary,
-                    text: summary,
-                });
             }
+
+            // Process URLs in the message
+            const urlRegex = /(https?:\/\/[^\s]+)/g;
+            const urls = processedContent.match(urlRegex) || [];
+
+            for (const url of urls) {
+                try {
+                    const videoService = this.runtime.getService<IVideoService>(ServiceType.VIDEO);
+
+                    if (videoService?.isVideoUrl(url)) {
+                        try {
+                            const videoInfo = await videoService.processVideo(url, this.runtime);
+                            attachments.push({
+                                id: `youtube-${Date.now()}`,
+                                url: url,
+                                title: videoInfo.title || "Video",
+                                source: "YouTube",
+                                description: videoInfo.description || "Video content",
+                                text: videoInfo.text || "Video content not available",
+                            });
+                        } catch (videoError) {
+                            elizaLogger.error(`Error processing video URL ${url}: ${videoError.message}`);
+                            attachments.push({
+                                id: `youtube-${Date.now()}`,
+                                url: url,
+                                title: "Video Link",
+                                source: "YouTube",
+                                description: "Video content (processing unavailable)",
+                                text: `Video content at ${url} (processing unavailable)`,
+                            });
+                        }
+                    } else {
+                        try {
+                            const browserService = this.runtime.getService<IBrowserService>(ServiceType.BROWSER);
+                            if (browserService) {
+                                const { title, description: summary } = await browserService.getPageContent(url, this.runtime);
+                                attachments.push({
+                                    id: `webpage-${Date.now()}`,
+                                    url: url,
+                                    title: title || "Web Page",
+                                    source: "Web",
+                                    description: summary,
+                                    text: summary,
+                                });
+                            }
+                        } catch (browserError) {
+                            elizaLogger.error(`Error processing webpage URL ${url}: ${browserError.message}`);
+                        }
+                    }
+                } catch (urlError) {
+                    elizaLogger.error(`Error processing URL ${url}: ${urlError.message}`);
+                }
+            }
+
+        } catch (error) {
+            elizaLogger.error(`Error in processMessageMedia: ${error.message}`);
         }
 
         return { processedContent, attachments };

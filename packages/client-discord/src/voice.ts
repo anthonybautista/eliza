@@ -928,42 +928,51 @@ export class VoiceManager extends EventEmitter {
     }
 
     async playAudioStream(userId: UUID, audioStream: Readable) {
-        const connection = this.connections.get(userId);
-        if (connection == null) {
-            console.log(`No connection for user ${userId}`);
-            return;
-        }
-        this.cleanupAudioPlayer(this.activeAudioPlayer);
-        const audioPlayer = createAudioPlayer({
-            behaviors: {
-                noSubscriber: NoSubscriberBehavior.Pause,
-            },
-        });
-        this.activeAudioPlayer = audioPlayer;
-        connection.subscribe(audioPlayer);
-
-        const audioStartTime = Date.now();
-
-        const resource = createAudioResource(audioStream, {
-            inputType: StreamType.Arbitrary,
-        });
-        audioPlayer.play(resource);
-
-        audioPlayer.on("error", (err: any) => {
-            console.log(`Audio player error: ${err}`);
-        });
-
-        audioPlayer.on(
-            "stateChange",
-            (_oldState: any, newState: { status: string }) => {
-                if (newState.status == "idle") {
-                    const idleTime = Date.now();
-                    console.log(
-                        `Audio playback took: ${idleTime - audioStartTime}ms`
-                    );
-                }
+        try {
+            const connection = this.connections.get(userId);
+            if (connection == null) {
+                elizaLogger.warn(`No connection for user ${userId}`);
+                return;
             }
-        );
+
+            this.cleanupAudioPlayer(this.activeAudioPlayer);
+
+            try {
+                const audioPlayer = createAudioPlayer({
+                    behaviors: {
+                        noSubscriber: NoSubscriberBehavior.Pause,
+                    },
+                });
+
+                this.activeAudioPlayer = audioPlayer;
+                connection.subscribe(audioPlayer);
+
+                const audioStartTime = Date.now();
+
+                const resource = createAudioResource(audioStream, {
+                    inputType: StreamType.Arbitrary,
+                });
+
+                audioPlayer.play(resource);
+
+                audioPlayer.on("error", (err: any) => {
+                    elizaLogger.error(`Audio player error: ${err}`);
+                    this.cleanupAudioPlayer(audioPlayer);
+                });
+
+                audioPlayer.on("stateChange", (_oldState: any, newState: { status: string }) => {
+                    if (newState.status == "idle") {
+                        const idleTime = Date.now();
+                        elizaLogger.debug(`Audio playback took: ${idleTime - audioStartTime}ms`);
+                    }
+                });
+            } catch (audioError) {
+                elizaLogger.error(`Error setting up audio player: ${audioError.message}`);
+                this.cleanupAudioPlayer(this.activeAudioPlayer);
+            }
+        } catch (error) {
+            elizaLogger.error(`Error in playAudioStream: ${error.message}`);
+        }
     }
 
     cleanupAudioPlayer(audioPlayer: AudioPlayer) {

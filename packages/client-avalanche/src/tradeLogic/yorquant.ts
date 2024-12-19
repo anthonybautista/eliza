@@ -87,7 +87,7 @@ Key Strategy Points:
 - Consider unstaking and buying when price shows weakness
 
 Considering the above market conditions and strategy goals, recommend ONE of these actions:
-1. BUY_SHARES: Purchase shares with available AVAX to create buy pressure
+1. BUY_SHARES: Purchase shares with available AVAX to create buy pressure. If AVAX balance is below share price WAIT
 2. STAKE_YAK: Convert idle AVAX to YRT via WAVAX & sAVAX for yield farming
 3. WITHDRAW_AND_BUY: Exit YRT position to buy shares (effective after price drops)
 4. WAIT: Hold current position (use amount: "0")
